@@ -1,0 +1,14 @@
+# Runtime and generated workflow outputs
+__pycache__/
+analysis/
+build/
+dist/
+logs/
+plots/
+runs/
+*.egg-info/
+current_task.txt
+
+# Local backup copies referenced by the workspace instructions
+fluid-agent-pro/
+fluid-agent-pro-open-source/
