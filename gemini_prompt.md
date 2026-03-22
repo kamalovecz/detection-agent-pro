@@ -20,6 +20,7 @@
 ## Phase 0: Environment Setup
 
 **Toolchain Detection:**
+
 - 在执行任何处理和编译之前，脚本必须首先检测必备的工具链环境。
 - 必须检测系统环境中 `g++` 和 `python` 是否可用。
 - 必须通过在系统终端执行 `typst --version` 命令来检测排版工具 Typst 的环境。
@@ -29,6 +30,7 @@
 
 **Objective:** [简述需要实现的算法或复现目标]
 **C++ Implementation Guide:**
+
 - [说明需要修改或创建的 C++ 核心文件及物理/数值逻辑，如离散格式、求解器主循环等]
 - [提供必要的物理常量或边界条件设定]
   **Verification Criteria:**
@@ -38,6 +40,7 @@
 ## Phase 2: Data Analysis & Comparison
 
 **Analysis Script Requirements:**
+
 - [指示 Codex 如何使用 Python 处理 C++ 生成的 CSV 数据]
 - [指示 Codex 如何读取并解析 `ref.data` 目录下的基准验证文件（如 .txt 或 .csv）]
   **Plotting Instructions:**
@@ -49,6 +52,7 @@
 ## Phase 3: Paper Framework
 
 **Results Structure:**
+
 - [规划 Results 章节的段落大意，提示后期的 Typst 脚本需要引用哪张图表]
   **Discussion Focus:**
 - [指出后期的分析脚本需要重点探讨的物理机理、数值假扩散或异常现象]
