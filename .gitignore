@@ -1,5 +1,6 @@
 # Runtime and generated workflow outputs
 __pycache__/
+.venv/
 analysis/
 build/
 dist/
@@ -8,6 +9,7 @@ plots/
 runs/
 *.egg-info/
 current_task.txt
+mcp-servers/
 
 # Local backup copies referenced by the workspace instructions
 fluid-agent-pro/
