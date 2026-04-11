@@ -269,6 +269,14 @@ fluid-agent-pro --clear --purge-install --workspace .
 - 它们通常接入 Claude Desktop、Cursor、VS Code、ChatGPT Developer Mode 或支持 MCP 的客户端
 - 其中 `stata-mcp` 主要是编辑器扩展，不是单独的本地 stdio 脚本项目
 
+为了方便 Windows 本地接入，我还额外生成了：
+
+- `mcp-client-configs/windows/claude_desktop_config.example.json`
+- `mcp-client-configs/windows/cursor_mcp.example.json`
+- `mcp-client-configs/windows/README.md`
+- `scripts/start_zotero_mcp_stdio.ps1`
+- `scripts/start_word_mcp_stdio.ps1`
+
 ---
 
 ## 7. Zotero MCP：文献检索与参考文献协作
@@ -297,6 +305,12 @@ pip install zotero-mcp-server
 ```powershell
 pip install "zotero-mcp-server[semantic]"
 ```
+
+当前这台机器上我已经把 **core 版** 安装到了：
+
+- `mcp-servers/zotero-mcp/.venv/`
+
+也就是说，基础文献检索、条目读取和本地 MCP 运行已经具备条件；但如果你后续想启用 `semantic` 语义检索，还需要额外安装 `semantic` 扩展依赖。
 
 ### 7.2 首次配置
 
@@ -368,6 +382,10 @@ pip install -r requirements.txt
 ```powershell
 python setup_mcp.py
 ```
+
+当前这台机器上我已经把它安装到了：
+
+- `mcp-servers/office-word-mcp-server/.venv/`
 
 ### 8.2 Claude Desktop 配置示例
 

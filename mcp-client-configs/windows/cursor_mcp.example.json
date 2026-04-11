@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "zotero": {
+      "command": "D:\\Code\\paper_pass_skill\\fluid-agent-pro\\mcp-servers\\zotero-mcp\\.venv\\Scripts\\zotero-mcp.exe",
+      "env": {
+        "ZOTERO_LOCAL": "true"
+      }
+    },
+    "word-document-server": {
+      "command": "D:\\Code\\paper_pass_skill\\fluid-agent-pro\\mcp-servers\\office-word-mcp-server\\.venv\\Scripts\\word_mcp_server.exe",
+      "env": {
+        "MCP_TRANSPORT": "stdio"
+      }
+    }
+  }
+}
