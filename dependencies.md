@@ -1,37 +1,39 @@
 # FluidAgent Pro 项目依赖
 
-这份文档列出完整流程需要的环境、工具和运行时凭据。核心控制器本身尽量保持标准库实现，但完整科研流水线会依赖外部工具链。
+这份文档列出当前这套“金属表面缺陷检测论文工作流”推荐的环境与工具。
 
 ## 1. 基础运行环境
 
-- Python 3.10 或更高版本
-- Linux 或 WSL 环境
-- 你的 CFD 工程源码、编译器和测试数据
+- Python 3.10+
+- Windows、Linux 或 WSL
+- 可选 GPU 环境，用于 YOLOv8 训练、验证与部署测试
 
 ## 2. 必需命令行工具
 
 - `codex` CLI
-  - 用于代码实现、验证辅助、论文修复和模板化导出
-  - 需要在 `PATH` 中可直接执行
+  - 用于实现、分析、论文修订与模板导出阶段
 - `typst`
-  - 用于论文源文件编译成 PDF
-  - Phase 0 会先检查 `typst --version`
+  - 用于将论文源文件编译为 PDF
 
-## 3. Python 依赖
+## 3. 推荐 Python 依赖
 
-- 核心控制器：当前以标准库为主，不依赖第三方 Python 包即可启动 CLI
-- `PySide6>=6.7`
-  - 仅 GUI 模式需要
-  - 安装命令：`pip install -e '.[gui]'`
+- `torch`
+- `torchvision`
+- `ultralytics`
+- `opencv-python`
+- `numpy`
 - `pandas`
-  - 数据分析阶段常用
-  - Phase 0 会按研究方案检查是否可用
 - `matplotlib`
-  - 绘图阶段常用
-  - Phase 0 会按研究方案检查是否可用
-- `PyInstaller>=6.0`
-  - 仅打包成安装包时需要
-  - 安装命令：`pip install -e '.[packager]'`
+- `seaborn`
+- `pyyaml`
+
+可选依赖：
+
+- `onnx`
+- `onnxruntime`
+- `thop`
+- `PySide6>=6.7`：GUI 模式
+- `PyInstaller>=6.0`：打包
 
 ## 4. Gemini API 依赖
 
@@ -40,34 +42,30 @@ Gemini 主要用于论文草稿生成阶段，也就是 `STATE_PAPER_WRITING`。
 需要准备：
 
 - `GEMINI_API_KEY` 或 `GOOGLE_API_KEY`
-  - 至少设置一个
-  - 程序会优先读取 `GEMINI_API_KEY`
-- 可选的 `FLUID_AGENT_GEMINI_MODEL`
-  - 用于覆盖默认模型名
-  - 默认值是 `gemini-2.5-pro`
+- 可选环境变量 `FLUID_AGENT_GEMINI_MODEL`
 - 可访问 Gemini API 的网络环境
 
-Gemini 在流程中的职责是：
+Gemini 在本项目中的职责：
 
 - 根据 `research_plan.md`、`metadata.json` 和分析结果生成论文草稿
-- 不直接负责代码实现
-- 不负责 Typst 语法修复
-- 不负责最终模板化导出
+- 不直接负责训练代码实现
+- 不直接负责 Typst 语法修复
+- 不直接负责最终模板导出
 
-后续两步分别由 Codex 接管：
+后两步由 Codex 接管：
 
-- `STATE_PAPER_FIX`：修 Typst 语法、引用和结构
-- `STATE_PAPER_TEMPLATE_EXPORT`：按 `paper-template/clear-iclr/` 重排并导出 PDF
+- `STATE_PAPER_FIX`：修复 `paper.typ`
+- `STATE_PAPER_TEMPLATE_EXPORT`：生成 `paper_final.typ` 并导出 `paper.pdf`
 
-## 5. 工作区必备文件
+## 5. 推荐工作区内容
 
 - `fluid_agent_pro.py`
 - `research_plan.md`
-- `paper-template/clear-iclr/`
-
-建议再准备：
-
 - `metadata.json`
 - `references.bib`
-- 你的求解器源码和结果数据
-
+- `paper-template/clear-iclr/`
+- `src/`
+- `configs/`
+- `weights/`
+- `analysis/`
+- `plots/`

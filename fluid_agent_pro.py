@@ -1,7 +1,7 @@
 """FluidAgent Pro runtime.
 
-This module implements the production pipeline for the 2-4 steps:
-Codex coding -> Codex/validator verification -> human review gating ->
+This module implements a reusable multi-stage research pipeline:
+Codex implementation -> Codex/validator verification -> human review gating ->
 Codex analysis -> human review gating -> Gemini paper draft ->
 Codex Typst repair and final validation.
 
@@ -38,7 +38,7 @@ import tty
 
 INVISIBLE_FILENAME_MARKS = {"\ufeff", "\u200b", "\u200c", "\u200d"}
 DEFAULT_METADATA = {
-    "title": "FluidAgent Pro",
+    "title": "Real-Time Metal Surface Defect Detection with Improved YOLOv8",
     "authors": ["Unknown Author"],
     "reference_doi": "",
 }
@@ -46,7 +46,7 @@ DEFAULT_STAGE_ATTEMPTS = 3
 DEFAULT_CODEX_TIMEOUT = 60 * 60
 DEFAULT_GEMINI_TIMEOUT = 5 * 60
 DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
-DEFAULT_SUBDIRS = ("src", "analysis", "logs", "plots", "runs")
+DEFAULT_SUBDIRS = ("src", "configs", "weights", "analysis", "logs", "plots", "runs")
 RESET_TOP_LEVEL_FILES = (
     ".agent_state.json",
     "current_task.txt",
@@ -65,8 +65,13 @@ RESET_TOP_LEVEL_DIRS = (
 )
 RESET_HARD_TOP_LEVEL_DIRS = ("src",)
 CLEAR_TOP_LEVEL_FILES = (
-    "u_comparison_plot.png",
-    "v_comparison_plot.png",
+    "comparison_plot.png",
+    "confusion_matrix.png",
+    "f1_curve.png",
+    "p_curve.png",
+    "pr_curve.png",
+    "r_curve.png",
+    "results.png",
 )
 CLEAR_TOP_LEVEL_DIRS = (
     ".pytest_cache",
@@ -317,35 +322,48 @@ class ToolchainChecker:
         else:
             status_cb(f"[Bootstrap] Phase 0 tool check passed: {codex_detail}")
 
-        if "pandas" in phase_text:
-            pandas_ok, pandas_detail = self._check_python_module("pandas")
-            report.checks.append(pandas_detail)
-            if not pandas_ok:
-                report.success = False
-                report.failures.append(pandas_detail)
-                status_cb(f"[Bootstrap] Phase 0 tool check failed: {pandas_detail}")
+        executable_hints = {
+            "pip": "pip",
+            "typst": "typst",
+        }
+        for keyword, executable in executable_hints.items():
+            if keyword not in phase_text:
+                continue
+            if executable == "typst":
+                ok, detail = self._check_typst()
             else:
-                status_cb(f"[Bootstrap] Phase 0 tool check passed: {pandas_detail}")
+                ok, detail = self._check_executable(executable)
+            report.checks.append(detail)
+            if not ok:
+                report.success = False
+                report.failures.append(detail)
+                status_cb(f"[Bootstrap] Phase 0 tool check failed: {detail}")
+            else:
+                status_cb(f"[Bootstrap] Phase 0 tool check passed: {detail}")
 
-        if "matplotlib" in phase_text:
-            matplotlib_ok, matplotlib_detail = self._check_python_module("matplotlib")
-            report.checks.append(matplotlib_detail)
-            if not matplotlib_ok:
+        module_hints = {
+            "torchvision": "torchvision",
+            "ultralytics": "ultralytics",
+            "opencv-python": "cv2",
+            "onnxruntime": "onnxruntime",
+            "matplotlib": "matplotlib",
+            "seaborn": "seaborn",
+            "pandas": "pandas",
+            "numpy": "numpy",
+            "torch": "torch",
+            "onnx": "onnx",
+        }
+        for keyword, module_name in module_hints.items():
+            if keyword not in phase_text:
+                continue
+            ok, detail = self._check_python_module(module_name)
+            report.checks.append(detail)
+            if not ok:
                 report.success = False
-                report.failures.append(matplotlib_detail)
-                status_cb(f"[Bootstrap] Phase 0 tool check failed: {matplotlib_detail}")
+                report.failures.append(detail)
+                status_cb(f"[Bootstrap] Phase 0 tool check failed: {detail}")
             else:
-                status_cb(f"[Bootstrap] Phase 0 tool check passed: {matplotlib_detail}")
-
-        if "typst" in phase_text:
-            typst_ok, typst_detail = self._check_typst()
-            report.checks.append(typst_detail)
-            if not typst_ok:
-                report.success = False
-                report.failures.append(typst_detail)
-                status_cb(f"[Bootstrap] Phase 0 tool check failed: {typst_detail}")
-            else:
-                status_cb(f"[Bootstrap] Phase 0 tool check passed: {typst_detail}")
+                status_cb(f"[Bootstrap] Phase 0 tool check passed: {detail}")
 
         report_path = log_dir / "phase0_environment_check.json"
         report.report_path = report_path
@@ -1769,7 +1787,11 @@ class PaperTemplateExporter:
 
     def _resolve_template_root(self, workspace: Path) -> Path:
         candidates = [
+            workspace / "template" / "jrip",
+            workspace / "template" / "industrial-vision",
             workspace / "template" / "clear-iclr",
+            workspace / "paper-template" / "jrip",
+            workspace / "paper-template" / "industrial-vision",
             workspace / "paper-template" / "clear-iclr",
         ]
         for candidate in candidates:

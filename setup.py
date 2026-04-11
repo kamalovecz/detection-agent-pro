@@ -8,7 +8,7 @@ README = Path(__file__).with_name("readme.md")
 setup(
     name="fluid-agent-pro",
     version="0.1.0",
-    description="FluidAgent Pro research workflow controller",
+    description="Research workflow controller for industrial defect detection projects",
     long_description=README.read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     py_modules=["fluid_agent_pro", "fluid_agent_pro_gui"],
