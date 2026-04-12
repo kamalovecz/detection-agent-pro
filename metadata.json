@@ -1,0 +1,25 @@
+{
+  "title": "Real-Time Metal Surface Defect Detection with Improved YOLOv8",
+  "subtitle": "Cross-Dataset Modeling, Transfer Learning, and Deployment-Oriented Evaluation",
+  "authors": [
+    "Kama"
+  ],
+  "affiliations": [
+    "Independent Researcher"
+  ],
+  "address": "Shanghai, China",
+  "email": "replace-with-your-email@example.com",
+  "keywords": [
+    "metal surface defect detection",
+    "YOLOv8",
+    "NEU DET",
+    "GC10 DET",
+    "port_defect",
+    "transfer learning",
+    "industrial deployment"
+  ],
+  "venue": "Journal of Real-Time Image Processing",
+  "journal": "Journal of Real-Time Image Processing",
+  "year": 2026,
+  "reference_doi": ""
+}
