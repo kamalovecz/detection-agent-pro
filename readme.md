@@ -593,3 +593,81 @@ fluid-agent-pro --workspace .
 - Zotero MCP: [https://github.com/54yyyu/zotero-mcp](https://github.com/54yyyu/zotero-mcp)
 - Stata MCP: [https://github.com/hanlulong/stata-mcp](https://github.com/hanlulong/stata-mcp)
 - Office Word MCP Server: [https://github.com/GongRzhe/Office-Word-MCP-Server](https://github.com/GongRzhe/Office-Word-MCP-Server)
+
+---
+
+## 14. Springer LaTeX Template Integration
+
+The project now supports a Springer `svjour3` LaTeX template as an alternative to the original Typst export flow.
+
+If your workspace contains the journal package:
+
+```text
+D:\Code\paper_pass_skill\fluid-agent-pro\468198_LaTeX_DL_468198_01072021\LaTeX_DL_468198_240419
+```
+
+the template export stage will automatically prefer that template and generate:
+
+- `paper_final.tex`
+- `template_export_manifest.json`
+- `paper.pdf` if a local TeX toolchain is available
+
+### 14.1 Recommended workflow
+
+1. Keep writing and revising the scientific content in `paper.typ` through the normal FluidAgent Pro workflow.
+2. When the workflow reaches `STATE_PAPER_TEMPLATE_EXPORT`, the controller will:
+   - detect the Springer template
+   - convert the repaired draft into `paper_final.tex`
+   - keep the manuscript structure aligned with `svjour3`
+   - try to compile `paper.pdf` when `latexmk` or `pdflatex` is installed
+3. Continue polishing `paper_final.tex` as your journal-ready draft.
+
+### 14.2 Metadata fields worth adding
+
+For better LaTeX front matter, extend `metadata.json` like this:
+
+```json
+{
+  "title": "Real-Time Metal Surface Defect Detection with Improved YOLOv8",
+  "subtitle": "Cross-Dataset Modeling and Deployment-Oriented Evaluation",
+  "authors": ["Your Name"],
+  "affiliations": ["Your School or Lab"],
+  "address": "City, Country",
+  "email": "your_email@example.com",
+  "keywords": [
+    "metal surface defect detection",
+    "YOLOv8",
+    "NEU DET",
+    "GC10 DET",
+    "transfer learning"
+  ],
+  "venue": "Journal of Real-Time Image Processing"
+}
+```
+
+### 14.3 If you want PDF output locally
+
+Install one of the following:
+
+- MiKTeX: [https://miktex.org/download](https://miktex.org/download)
+- TeX Live: [https://www.tug.org/texlive/](https://www.tug.org/texlive/)
+
+After installation, make sure `latexmk` or `pdflatex` is available in `PATH`.
+
+You can check with:
+
+```powershell
+Get-Command latexmk,pdflatex,bibtex
+```
+
+If TeX tools are missing, the project will still generate `paper_final.tex`; only the PDF compilation step will be skipped.
+
+### 14.4 Practical note
+
+This integration is best used for:
+
+- generating the first journal-formatted draft
+- aligning title, abstract, sections, authors, affiliations, and bibliography with the official template
+- continuing later manual refinement in LaTeX or with Word/Zotero-assisted writing
+
+It is not meant to replace your experimental code. Your model code, datasets, and analysis scripts should remain in the project workspace as before.

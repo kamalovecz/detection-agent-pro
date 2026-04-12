@@ -32,8 +32,12 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-import termios
-import tty
+try:
+    import termios
+    import tty
+except ImportError:  # pragma: no cover - Windows fallback
+    termios = None  # type: ignore[assignment]
+    tty = None  # type: ignore[assignment]
 
 
 INVISIBLE_FILENAME_MARKS = {"\ufeff", "\u200b", "\u200c", "\u200d"}
@@ -42,6 +46,8 @@ DEFAULT_METADATA = {
     "authors": ["Unknown Author"],
     "reference_doi": "",
 }
+TEMPLATE_KIND_TYPST = "typst"
+TEMPLATE_KIND_SPRINGER_LATEX = "springer_latex"
 DEFAULT_STAGE_ATTEMPTS = 3
 DEFAULT_CODEX_TIMEOUT = 60 * 60
 DEFAULT_GEMINI_TIMEOUT = 5 * 60
@@ -52,7 +58,13 @@ RESET_TOP_LEVEL_FILES = (
     "current_task.txt",
     "paper.typ",
     "paper_final.typ",
+    "paper_final.tex",
     "paper.pdf",
+    "paper.aux",
+    "paper.bbl",
+    "paper.blg",
+    "paper.log",
+    "paper.out",
 )
 RESET_TOP_LEVEL_DIRS = (
     "analysis",
@@ -106,7 +118,7 @@ WORKSPACE_INVENTORY_IGNORED_DIRS = {
     "fluid-agent-pro-open-source",
 }
 ARTIFACT_RE = re.compile(
-    r"(?<![\w/])([A-Za-z0-9_./-]+\.(?:log|json|csv|png|svg|typ|pdf|txt|py|cpp|hpp|h|md))"
+    r"(?<![\w/])([A-Za-z0-9_./-]+\.(?:log|json|csv|png|svg|typ|tex|pdf|txt|py|cpp|hpp|h|md|aux|bbl|blg|cls|bst))"
 )
 
 
@@ -227,7 +239,19 @@ def _load_metadata(metadata_path: Path) -> dict[str, object]:
     elif isinstance(authors, str) and authors.strip():
         metadata["authors"] = [authors.strip()]
 
-    for key in ("affiliations", "keywords", "venue", "year"):
+    for key in (
+        "affiliations",
+        "affiliation",
+        "keywords",
+        "venue",
+        "year",
+        "subtitle",
+        "address",
+        "location",
+        "email",
+        "emails",
+        "journal",
+    ):
         if key in raw:
             metadata[key] = raw[key]
 
@@ -973,7 +997,7 @@ class ValidationRunner:
         report = ValidationReport(success=True)
 
         commands = list(phase.commands)
-        commands.extend(self._default_commands(state=state, workspace=workspace))
+        commands.extend(self._default_commands(state=state, workspace=workspace, template_root=template_root))
         deduped_commands = self._dedupe(commands)
         if deduped_commands:
             status_cb(f"[Validator] {state.value}: running {len(deduped_commands)} command(s)")
@@ -990,7 +1014,7 @@ class ValidationRunner:
                 status_cb(f"[Validator] command {index}/{len(deduped_commands)} passed")
 
         artifacts = list(phase.artifact_hints)
-        artifacts.extend(self._default_artifacts(state=state))
+        artifacts.extend(self._default_artifacts(state=state, workspace=workspace, template_root=template_root))
         deduped_artifacts = self._dedupe(artifacts)
         if deduped_artifacts:
             status_cb(f"[Validator] {state.value}: checking {len(deduped_artifacts)} artifact(s)")
@@ -1012,7 +1036,7 @@ class ValidationRunner:
                 status_cb(f"[Validator] artifact {index}/{len(deduped_artifacts)} MISSING: {hint} -> {resolved}")
 
         if state in {WorkflowState.PAPER_WRITING, WorkflowState.PAPER_FIX, WorkflowState.PAPER_TEMPLATE_EXPORT}:
-            paper_path = self._paper_source_path(state, workspace)
+            paper_path = self._paper_source_path(state, workspace, template_root=template_root)
             if paper_path.exists():
                 status_cb(f"[Validator] {paper_path.name} exists; running structure checks")
                 checks = self._check_paper_source(
@@ -1047,7 +1071,7 @@ class ValidationRunner:
         )
         return report
 
-    def _default_commands(self, *, state: WorkflowState, workspace: Path) -> list[str]:
+    def _default_commands(self, *, state: WorkflowState, workspace: Path, template_root: Optional[Path] = None) -> list[str]:
         commands: list[str] = []
         if state in {WorkflowState.CODING_VERIFY, WorkflowState.DATA_ANALYSIS}:
             python_files = self._python_files(workspace)
@@ -1062,17 +1086,42 @@ class ValidationRunner:
 
         if state in {WorkflowState.PAPER_WRITING, WorkflowState.PAPER_FIX} and shutil.which("typst"):
             commands.append(f"typst compile {shlex_quote(str(workspace / 'paper.typ'))} {shlex_quote(str(workspace / 'paper.pdf'))}")
-        if state == WorkflowState.PAPER_TEMPLATE_EXPORT and shutil.which("typst"):
-            commands.append(
-                f"typst compile {shlex_quote(str(workspace / 'paper_final.typ'))} {shlex_quote(str(workspace / 'paper.pdf'))}"
-            )
+        if state == WorkflowState.PAPER_TEMPLATE_EXPORT:
+            paper_source = self._paper_source_path(state, workspace, template_root=template_root)
+            if paper_source.suffix == ".typ" and shutil.which("typst"):
+                commands.append(f"typst compile {shlex_quote(str(paper_source))} {shlex_quote(str(workspace / 'paper.pdf'))}")
+            if paper_source.suffix == ".tex":
+                latexmk = shutil.which("latexmk")
+                pdflatex = shutil.which("pdflatex")
+                bibtex = shutil.which("bibtex")
+                source_name = shlex_quote(paper_source.name)
+                if latexmk:
+                    commands.append(f"latexmk -pdf -interaction=nonstopmode -halt-on-error -jobname=paper {source_name}")
+                elif pdflatex:
+                    commands.append(f"pdflatex -interaction=nonstopmode -halt-on-error -jobname=paper {source_name}")
+                    if bibtex and (workspace / "references.bib").exists():
+                        commands.append("bibtex paper")
+                        commands.append(f"pdflatex -interaction=nonstopmode -halt-on-error -jobname=paper {source_name}")
+                    commands.append(f"pdflatex -interaction=nonstopmode -halt-on-error -jobname=paper {source_name}")
         return commands
 
-    def _default_artifacts(self, *, state: WorkflowState) -> list[str]:
+    def _default_artifacts(
+        self,
+        *,
+        state: WorkflowState,
+        workspace: Path,
+        template_root: Optional[Path] = None,
+    ) -> list[str]:
         if state in {WorkflowState.PAPER_WRITING, WorkflowState.PAPER_FIX}:
             return ["paper.typ"]
         if state == WorkflowState.PAPER_TEMPLATE_EXPORT:
-            return ["paper_final.typ", "paper.pdf"]
+            paper_source = self._paper_source_path(state, workspace, template_root=template_root)
+            artifacts = [paper_source.name]
+            if paper_source.suffix == ".typ" and shutil.which("typst"):
+                artifacts.append("paper.pdf")
+            if paper_source.suffix == ".tex" and (shutil.which("latexmk") or shutil.which("pdflatex")):
+                artifacts.append("paper.pdf")
+            return artifacts
         return []
 
     def _python_files(self, workspace: Path) -> list[Path]:
@@ -1120,8 +1169,13 @@ class ValidationRunner:
             "summary": f"{command} -> rc={completed.returncode} ({duration:.1f}s)",
         }
 
-    def _paper_source_path(self, state: WorkflowState, workspace: Path) -> Path:
+    def _paper_source_path(self, state: WorkflowState, workspace: Path, template_root: Optional[Path] = None) -> Path:
         if state == WorkflowState.PAPER_TEMPLATE_EXPORT:
+            if template_root is not None and (template_root / "svjour3.cls").exists():
+                return workspace / "paper_final.tex"
+            tex_path = workspace / "paper_final.tex"
+            if tex_path.exists():
+                return tex_path
             return workspace / "paper_final.typ"
         return workspace / "paper.typ"
 
@@ -1138,29 +1192,55 @@ class ValidationRunner:
         failures = []
         if state == WorkflowState.PAPER_TEMPLATE_EXPORT:
             required_sections = ["Introduction", "Methods", "Results", "Discussion", "Conclusion"]
-            if re.search(r"(?m)^#show:\s*iclr2025\.with\(", text):
-                checks.append("OK template wrapper present: iclr2025.with")
-            else:
-                failures.append("Missing template wrapper: iclr2025.with")
-            for token in ("#set document(", "#set heading(", "#set text("):
-                if token in text:
-                    failures.append(f"Draft-only directive should be removed: {token}")
-            if template_root is not None:
-                logo_name = re.escape((template_root / "logo.typ").name)
-                if re.search(rf"(?m)^#import\s+\"[^\"]*{logo_name}\":\s*LaTeX,\s*LaTeXe", text):
-                    checks.append("OK template logo import present")
+            if paper_path.suffix == ".tex":
+                if re.search(r"(?m)^\\documentclass(?:\[[^\]]*\])?\{[^}]*svjour3[^}]*\}", text):
+                    checks.append("OK Springer documentclass present")
                 else:
-                    failures.append("Missing template logo import")
-            if re.search(r"(?m)^#bibliography\(", text):
-                checks.append("OK bibliography call present")
-            else:
-                failures.append("Missing bibliography call")
-            if template_root is not None:
-                template_logo = template_root / "logo.typ"
-                if template_logo.exists():
-                    checks.append(f"OK template asset present: {template_logo}")
+                    failures.append("Missing Springer documentclass based on svjour3")
+                for token in (r"\title{", r"\author{", r"\institute{", r"\begin{abstract}"):
+                    if token in text:
+                        checks.append(f"OK LaTeX token present: {token}")
+                    else:
+                        failures.append(f"Missing LaTeX token: {token}")
+                if "\\bibliography{" in text or "\\begin{thebibliography}" in text:
+                    checks.append("OK bibliography block present")
                 else:
-                    failures.append(f"Missing template asset: {template_logo}")
+                    failures.append("Missing bibliography block")
+                if template_root is not None:
+                    class_file = template_root / "svjour3.cls"
+                    template_file = template_root / "template.tex"
+                    if class_file.exists():
+                        checks.append(f"OK template asset present: {class_file}")
+                    else:
+                        failures.append(f"Missing template asset: {class_file}")
+                    if template_file.exists():
+                        checks.append(f"OK template asset present: {template_file}")
+                    else:
+                        failures.append(f"Missing template asset: {template_file}")
+            else:
+                if re.search(r"(?m)^#show:\s*iclr2025\.with\(", text):
+                    checks.append("OK template wrapper present: iclr2025.with")
+                else:
+                    failures.append("Missing template wrapper: iclr2025.with")
+                for token in ("#set document(", "#set heading(", "#set text("):
+                    if token in text:
+                        failures.append(f"Draft-only directive should be removed: {token}")
+                if template_root is not None:
+                    logo_name = re.escape((template_root / "logo.typ").name)
+                    if re.search(rf"(?m)^#import\s+\"[^\"]*{logo_name}\":\s*LaTeX,\s*LaTeXe", text):
+                        checks.append("OK template logo import present")
+                    else:
+                        failures.append("Missing template logo import")
+                if re.search(r"(?m)^#bibliography\(", text):
+                    checks.append("OK bibliography call present")
+                else:
+                    failures.append("Missing bibliography call")
+                if template_root is not None:
+                    template_logo = template_root / "logo.typ"
+                    if template_logo.exists():
+                        checks.append(f"OK template asset present: {template_logo}")
+                    else:
+                        failures.append(f"Missing template asset: {template_logo}")
         else:
             required_sections = ["Abstract", "Introduction", "Methods", "Results", "Discussion", "Conclusion"]
         for section in required_sections:
@@ -1171,10 +1251,11 @@ class ValidationRunner:
         for token in ("TODO", "TBD", "PLACEHOLDER"):
             if token in text:
                 failures.append(f"Found placeholder token: {token}")
-        if state == WorkflowState.PAPER_TEMPLATE_EXPORT and re.search(r"(?m)^abstract:\s*\[", text):
-            checks.append("OK abstract parameter present in template wrapper")
-        elif state == WorkflowState.PAPER_TEMPLATE_EXPORT:
-            failures.append("Missing abstract parameter in template wrapper")
+        if state == WorkflowState.PAPER_TEMPLATE_EXPORT and paper_path.suffix == ".typ":
+            if re.search(r"(?m)^abstract:\s*\[", text):
+                checks.append("OK abstract parameter present in template wrapper")
+            else:
+                failures.append("Missing abstract parameter in template wrapper")
         return {
             "success": not failures,
             "checks": checks,
@@ -1187,6 +1268,8 @@ class ValidationRunner:
             rf"(?m)^=+\s*{re.escape(title)}\b",
             rf"(?m)^#heading\([^\n]*\)\s*\[{re.escape(title)}\]",
             rf"(?m)^#heading\([^\n]*{re.escape(title)}[^\n]*\)",
+            rf"(?m)^\\section\{{\s*{re.escape(title)}\s*\}}",
+            rf"(?m)^\\subsection\{{\s*{re.escape(title)}\s*\}}",
         ]
         return any(re.search(pattern, text) for pattern in patterns)
 
@@ -1491,7 +1574,7 @@ class HumanReviewCLI:
                 self.print_status("[Review] Please enter Y, N, C, or Q.")
 
     def _read_visible_line(self, prompt: str) -> str:
-        if self.force_stdio:
+        if self.force_stdio or termios is None or tty is None or os.name == "nt":
             return input(prompt)
         tty_fd: Optional[int] = None
         owns_tty_fd = False
@@ -1702,9 +1785,16 @@ class PaperWriter:
         return "\n".join(normalized)
 
 
+@dataclass(frozen=True)
+class TemplateSpec:
+    root: Path
+    kind: str
+
+
 @dataclass
 class TemplateExportExecution:
     template_root: Path
+    template_kind: str
     draft_path: Path
     final_path: Path
     pdf_path: Path
@@ -1729,8 +1819,12 @@ class PaperTemplateExporter:
         if not draft_path.exists():
             raise FileNotFoundError(f"Draft paper not found: {draft_path}")
 
-        template_root = self._resolve_template_root(context.workspace)
-        bibliography_path = self._resolve_bibliography_path(context.workspace, template_root)
+        template_spec = self.resolve_template(context.workspace)
+        bibliography_path = self._resolve_bibliography_path(
+            context.workspace,
+            template_spec.root,
+            template_spec.kind,
+        )
         metadata = _load_metadata(context.metadata_path)
         draft_text = draft_path.read_text(encoding="utf-8")
         sections = self._split_heading_sections(draft_text)
@@ -1746,22 +1840,34 @@ class PaperTemplateExporter:
         if not abstract_text.strip():
             raise RuntimeError("paper.typ does not contain enough content to synthesize an abstract for template export.")
 
-        final_path = context.workspace / "paper_final.typ"
-        final_text = self._compose_document(
-            metadata=metadata,
-            template_root=template_root,
-            workspace=context.workspace,
-            bibliography_path=bibliography_path,
-            abstract_text=abstract_text,
-            body_sections=body_sections,
-        )
+        final_name = "paper_final.tex" if template_spec.kind == TEMPLATE_KIND_SPRINGER_LATEX else "paper_final.typ"
+        final_path = context.workspace / final_name
+        if template_spec.kind == TEMPLATE_KIND_SPRINGER_LATEX:
+            final_text = self._compose_springer_document(
+                metadata=metadata,
+                template_root=template_spec.root,
+                workspace=context.workspace,
+                bibliography_path=bibliography_path,
+                abstract_text=abstract_text,
+                body_sections=body_sections,
+            )
+        else:
+            final_text = self._compose_typst_document(
+                metadata=metadata,
+                template_root=template_spec.root,
+                workspace=context.workspace,
+                bibliography_path=bibliography_path,
+                abstract_text=abstract_text,
+                body_sections=body_sections,
+            )
         final_path.write_text(final_text.rstrip() + "\n", encoding="utf-8")
 
         manifest_path = run_dir / "template_export_manifest.json"
         manifest = {
             "workspace": str(context.workspace),
             "plan_heading": phase.heading,
-            "template_root": str(template_root),
+            "template_root": str(template_spec.root),
+            "template_kind": template_spec.kind,
             "draft_path": str(draft_path),
             "final_path": str(final_path),
             "pdf_path": str(context.workspace / "paper.pdf"),
@@ -1772,11 +1878,13 @@ class PaperTemplateExporter:
             "section_titles": [title for title, _ in body_sections],
         }
         _json_dump_atomic(manifest_path, manifest)
-        status_cb(f"[TemplateExport] template root: {template_root}")
-        status_cb(f"[TemplateExport] final Typst written to {final_path}")
+        status_cb(f"[TemplateExport] template root: {template_spec.root}")
+        status_cb(f"[TemplateExport] template kind: {template_spec.kind}")
+        status_cb(f"[TemplateExport] final source written to {final_path}")
         status_cb(f"[TemplateExport] manifest written to {manifest_path}")
         return TemplateExportExecution(
-            template_root=template_root,
+            template_root=template_spec.root,
+            template_kind=template_spec.kind,
             draft_path=draft_path,
             final_path=final_path,
             pdf_path=context.workspace / "paper.pdf",
@@ -1785,8 +1893,24 @@ class PaperTemplateExporter:
             section_titles=[title for title, _ in body_sections],
         )
 
-    def _resolve_template_root(self, workspace: Path) -> Path:
-        candidates = [
+    def resolve_template(self, workspace: Path) -> TemplateSpec:
+        springer_candidates: list[Path] = [
+            workspace / "468198_LaTeX_DL_468198_01072021" / "LaTeX_DL_468198_240419",
+            workspace / "468198_LaTeX_DL_468198_01072021",
+            workspace / "paper-template" / "springer-svjour3",
+            workspace / "paper-template" / "springer",
+            workspace / "template" / "springer-svjour3",
+            workspace / "template" / "springer",
+        ]
+        for bundle_dir in sorted(workspace.glob("*LaTeX*")):
+            springer_candidates.append(bundle_dir)
+            if bundle_dir.is_dir():
+                springer_candidates.extend(sorted(path for path in bundle_dir.iterdir() if path.is_dir()))
+        for candidate in springer_candidates:
+            if self._is_springer_template_dir(candidate):
+                return TemplateSpec(root=candidate, kind=TEMPLATE_KIND_SPRINGER_LATEX)
+
+        typst_candidates = [
             workspace / "template" / "jrip",
             workspace / "template" / "industrial-vision",
             workspace / "template" / "clear-iclr",
@@ -1794,21 +1918,36 @@ class PaperTemplateExporter:
             workspace / "paper-template" / "industrial-vision",
             workspace / "paper-template" / "clear-iclr",
         ]
-        for candidate in candidates:
-            if candidate.exists() and (candidate / "logo.typ").exists() and (candidate / "main.typ").exists():
-                return candidate
+        for candidate in typst_candidates:
+            if self._is_typst_template_dir(candidate):
+                return TemplateSpec(root=candidate, kind=TEMPLATE_KIND_TYPST)
+
         raise FileNotFoundError(
-            f"Could not find a Typst template directory in {workspace}."
+            f"Could not find a supported template directory in {workspace}. "
+            "Expected either a Typst template with logo.typ/main.typ or a Springer LaTeX template with template.tex/svjour3.cls."
         )
 
-    def _resolve_bibliography_path(self, workspace: Path, template_root: Path) -> str:
+    def _resolve_template_root(self, workspace: Path) -> Path:
+        return self.resolve_template(workspace).root
+
+    def _resolve_bibliography_path(self, workspace: Path, template_root: Path, template_kind: str) -> str:
         workspace_bib = workspace / "references.bib"
         if workspace_bib.exists():
             return _safe_relpath(workspace_bib, workspace)
         template_bib = template_root / "main.bib"
         if template_bib.exists():
             return _safe_relpath(template_bib, workspace)
+        if template_kind == TEMPLATE_KIND_SPRINGER_LATEX:
+            return ""
         raise FileNotFoundError("Could not find references.bib or template main.bib for template export.")
+
+    @staticmethod
+    def _is_typst_template_dir(candidate: Path) -> bool:
+        return candidate.exists() and (candidate / "logo.typ").exists() and (candidate / "main.typ").exists()
+
+    @staticmethod
+    def _is_springer_template_dir(candidate: Path) -> bool:
+        return candidate.exists() and (candidate / "template.tex").exists() and (candidate / "svjour3.cls").exists()
 
     @staticmethod
     def _split_sections(text: str) -> list[tuple[str, str]]:
@@ -1882,7 +2021,7 @@ class PaperTemplateExporter:
                 return snippet
         return ""
 
-    def _compose_document(
+    def _compose_typst_document(
         self,
         *,
         metadata: dict[str, object],
@@ -1922,6 +2061,72 @@ class PaperTemplateExporter:
         parts.append(f"#bibliography({json.dumps(bibliography_path)}, title: \"References\")")
         return "\n".join(parts).rstrip() + "\n"
 
+    def _compose_springer_document(
+        self,
+        *,
+        metadata: dict[str, object],
+        template_root: Path,
+        workspace: Path,
+        bibliography_path: str,
+        abstract_text: str,
+        body_sections: list[tuple[str, str]],
+    ) -> str:
+        title = self._escape_latex_text(str(metadata.get("title") or DEFAULT_METADATA["title"]))
+        subtitle = self._escape_latex_text(str(metadata.get("subtitle") or "")).strip()
+        class_path = _safe_relpath(template_root / "svjour3.cls", workspace).replace("\\", "/")
+        class_ref = class_path[:-4] if class_path.endswith(".cls") else class_path
+        journal_name = metadata.get("journal") or metadata.get("venue") or ""
+        parts = [
+            "% Auto-generated by FluidAgent Pro",
+            f"\\documentclass[smallextended]{{{class_ref}}}",
+            "\\smartqed",
+            "\\usepackage{graphicx}",
+            "\\usepackage{amsmath}",
+            "\\usepackage[hidelinks]{hyperref}",
+        ]
+        if str(journal_name).strip():
+            parts.append(f"\\journalname{{{self._escape_latex_text(str(journal_name))}}}")
+        parts.extend(
+            [
+                "",
+                "\\begin{document}",
+                "",
+                f"\\title{{{title}}}",
+            ]
+        )
+        if subtitle:
+            parts.append(f"\\subtitle{{{subtitle}}}")
+        parts.extend(
+            [
+                "",
+                self._render_springer_author_names(metadata),
+                "",
+                self._render_springer_institute(metadata),
+                "",
+                "\\date{}",
+                "",
+                "\\maketitle",
+                "",
+                "\\begin{abstract}",
+                self._render_latex_text(abstract_text).strip() or "Abstract unavailable.",
+            ]
+        )
+        keywords = self._render_springer_keywords(metadata)
+        if keywords:
+            parts.append(keywords)
+        parts.extend(
+            [
+                "\\end{abstract}",
+                "",
+                self._render_latex_body(body_sections),
+                "",
+                self._render_springer_bibliography(bibliography_path, template_root=template_root, workspace=workspace),
+                "",
+                "\\end{document}",
+            ]
+        )
+        return "\n".join(part for part in parts if part is not None).rstrip() + "\n"
+
     def _render_authors(self, metadata: dict[str, object]) -> str:
         names = self._normalize_list(metadata.get("authors"))
         if not names:
@@ -1958,6 +2163,141 @@ class PaperTemplateExporter:
             else:
                 rendered.append(f"= {title}")
         return "\n\n".join(rendered).strip()
+
+    def _render_springer_author_names(self, metadata: dict[str, object]) -> str:
+        names = self._normalize_list(metadata.get("authors"))
+        if not names:
+            names = list(DEFAULT_METADATA["authors"])
+        joined = " \\and ".join(self._escape_latex_text(name) for name in names)
+        return f"\\author{{{joined}}}"
+
+    def _render_springer_institute(self, metadata: dict[str, object]) -> str:
+        names = self._normalize_list(metadata.get("authors")) or list(DEFAULT_METADATA["authors"])
+        affiliations = self._normalize_list(metadata.get("affiliations") or metadata.get("affiliation"))
+        emails = self._normalize_list(metadata.get("emails"))
+        single_email = self._pick_email(metadata)
+        institute_parts: list[str] = []
+        for index, name in enumerate(names):
+            affiliation = affiliations[index] if index < len(affiliations) else self._pick_affiliation(metadata)
+            lines = [f"{self._escape_latex_text(name)} \\at", f"   {self._escape_latex_text(affiliation)}"]
+            if index == 0:
+                address = self._pick_address(metadata)
+                if address and address != affiliation:
+                    lines.append(f"   \\\\ {self._escape_latex_text(address)}")
+            email = emails[index] if index < len(emails) else (single_email if index == 0 else "")
+            if email:
+                lines.append(f"   \\\\ \\email{{{self._escape_latex_text(email)}}}")
+            institute_parts.append("\n".join(lines))
+        joined = "\n\\and\n".join(institute_parts)
+        return "\\institute{" + joined + "\n}"
+
+    def _render_springer_keywords(self, metadata: dict[str, object]) -> str:
+        keywords = self._normalize_list(metadata.get("keywords"))
+        if not keywords:
+            return ""
+        joined = " \\and ".join(self._escape_latex_text(item) for item in keywords)
+        return f"\\keywords{{{joined}}}"
+
+    def _render_springer_bibliography(self, bibliography_path: str, *, template_root: Path, workspace: Path) -> str:
+        if bibliography_path:
+            bib_ref = bibliography_path.replace("\\", "/")
+            if bib_ref.lower().endswith(".bib"):
+                bib_ref = bib_ref[:-4]
+            style_path = _safe_relpath(template_root / "spmpsci.bst", workspace).replace("\\", "/")
+            if style_path.lower().endswith(".bst"):
+                style_path = style_path[:-4]
+            return "\n".join(
+                [
+                    f"\\bibliographystyle{{{style_path}}}",
+                    f"\\bibliography{{{bib_ref}}}",
+                ]
+            )
+        return "\n".join(
+            [
+                "\\begin{thebibliography}{}",
+                "\\bibitem{placeholder} Reference list to be added by the authors.",
+                "\\end{thebibliography}",
+            ]
+        )
+
+    def _render_latex_body(self, sections: list[tuple[str, str]]) -> str:
+        rendered: list[str] = []
+        for title, body in sections:
+            if title.strip().lower() == "abstract":
+                continue
+            rendered.append(f"\\section{{{self._escape_latex_text(title)}}}")
+            rendered.append(self._render_latex_text(body).strip() or "% Section content pending.")
+            rendered.append("")
+        return "\n".join(rendered).strip()
+
+    def _render_latex_text(self, text: str) -> str:
+        lines = text.strip().splitlines()
+        if not lines:
+            return ""
+        rendered: list[str] = []
+        list_mode: Optional[str] = None
+        in_verbatim = False
+        for raw_line in lines:
+            stripped = raw_line.strip()
+            if stripped.startswith("```"):
+                if list_mode is not None:
+                    rendered.append(f"\\end{{{list_mode}}}")
+                    list_mode = None
+                rendered.append("\\begin{verbatim}" if not in_verbatim else "\\end{verbatim}")
+                in_verbatim = not in_verbatim
+                continue
+            if in_verbatim:
+                rendered.append(raw_line)
+                continue
+            bullet_match = re.match(r"^[-*]\s+(.+)$", stripped)
+            number_match = re.match(r"^\d+\.\s+(.+)$", stripped)
+            if bullet_match:
+                if list_mode != "itemize":
+                    if list_mode is not None:
+                        rendered.append(f"\\end{{{list_mode}}}")
+                    rendered.append("\\begin{itemize}")
+                    list_mode = "itemize"
+                rendered.append(f"\\item {self._escape_latex_text(bullet_match.group(1))}")
+                continue
+            if number_match:
+                if list_mode != "enumerate":
+                    if list_mode is not None:
+                        rendered.append(f"\\end{{{list_mode}}}")
+                    rendered.append("\\begin{enumerate}")
+                    list_mode = "enumerate"
+                rendered.append(f"\\item {self._escape_latex_text(number_match.group(1))}")
+                continue
+            if list_mode is not None:
+                rendered.append(f"\\end{{{list_mode}}}")
+                list_mode = None
+            if not stripped:
+                rendered.append("")
+                continue
+            rendered.append(self._escape_latex_text(stripped))
+        if list_mode is not None:
+            rendered.append(f"\\end{{{list_mode}}}")
+        if in_verbatim:
+            rendered.append("\\end{verbatim}")
+        return "\n".join(rendered).strip()
+
+    @staticmethod
+    def _escape_latex_text(text: str) -> str:
+        replacements = {
+            "\\": r"\textbackslash{}",
+            "&": r"\&",
+            "%": r"\%",
+            "$": r"\$",
+            "#": r"\#",
+            "_": r"\_",
+            "{": r"\{",
+            "}": r"\}",
+            "~": r"\textasciitilde{}",
+            "^": r"\textasciicircum{}",
+        }
+        escaped = []
+        for char in str(text):
+            escaped.append(replacements.get(char, char))
+        return "".join(escaped)
 
     @staticmethod
     def _indent_block(text: str, indent: int = 4) -> str:
@@ -2257,7 +2597,16 @@ class FluidAgentPro:
             if state == WorkflowState.DONE:
                 self.context.save()
                 final_pdf = self.context.artifacts.get("paper_pdf", str(self.workspace / "paper.pdf"))
-                final_source = self.context.artifacts.get("paper_final_typ", self.context.artifacts.get("paper_typ", str(self.workspace / "paper.typ")))
+                final_source = self.context.artifacts.get(
+                    "paper_final_source",
+                    self.context.artifacts.get(
+                        "paper_final_tex",
+                        self.context.artifacts.get(
+                            "paper_final_typ",
+                            self.context.artifacts.get("paper_typ", str(self.workspace / "paper.typ")),
+                        ),
+                    ),
+                )
                 self.review_cli.print_status(f"[FSM] Workflow finished. Final source: {final_source}; PDF: {final_pdf}")
                 return
             if state == WorkflowState.ERROR:
@@ -2677,22 +3026,14 @@ class FluidAgentPro:
         self.review_cli.print_status(f"[{WorkflowState.PAPER_TEMPLATE_EXPORT.value}] Phase: {phase.heading}")
         self.review_cli.print_status(f"[{WorkflowState.PAPER_TEMPLATE_EXPORT.value}] Attempt: {attempt}")
         self.review_cli.print_status(f"[{WorkflowState.PAPER_TEMPLATE_EXPORT.value}] Draft source: {draft_path}")
-        self.review_cli.print_status(f"[{WorkflowState.PAPER_TEMPLATE_EXPORT.value}] Final source: {self.workspace / 'paper_final.typ'}")
         try:
-            template_root = self.paper_template_exporter._resolve_template_root(self.workspace)
-            bibliography_path = self.paper_template_exporter._resolve_bibliography_path(self.workspace, template_root)
-            draft_text = draft_path.read_text(encoding="utf-8")
-            sections = self.paper_template_exporter._split_heading_sections(draft_text)
-            if not sections:
-                raise RuntimeError("paper.typ does not contain any top-level sections to export.")
-            abstract_text, body_sections, abstract_found = self.paper_template_exporter._partition_draft_sections(sections)
-            if not abstract_found:
-                self.review_cli.print_status(
-                    "[TemplateExport] Draft has no explicit Abstract heading; Codex will synthesize a fallback abstract from the manuscript content."
-                )
-                abstract_text = self.paper_template_exporter._fallback_abstract(body_sections)
-            if not abstract_text.strip():
-                raise RuntimeError("paper.typ does not contain enough content to synthesize an abstract for template export.")
+            execution = self.paper_template_exporter.export(
+                context=self.context,
+                plan=self.plan,
+                phase=phase,
+                run_dir=run_dir,
+                status_cb=self.review_cli.print_status,
+            )
         except Exception as exc:
             feedback = f"Template export setup failed: {exc}"
             self.context.last_feedback = feedback + "\n"
@@ -2721,41 +3062,76 @@ class FluidAgentPro:
             self.review_cli.print_status("Paper template export setup failed; awaiting user guidance.")
             return
 
-        final_path = self.workspace / "paper_final.typ"
-        pdf_path = self.workspace / "paper.pdf"
-        manifest_path = run_dir / "template_export_manifest.json"
-        section_titles = [title for title, _ in body_sections]
-        manifest = {
-            "workspace": str(self.workspace),
-            "draft_path": str(draft_path),
-            "final_path": str(final_path),
-            "pdf_path": str(pdf_path),
-            "template_root": str(template_root),
-            "bibliography_path": bibliography_path,
-            "title": str(self.metadata.get("title", DEFAULT_METADATA["title"])),
-            "section_titles": section_titles,
-            "abstract_preview": _shorten_text(abstract_text, 300),
-            "template_reference": str(template_root / "main.typ"),
-            "body_preview": _shorten_text("\n\n".join(f"= {title}" for title in section_titles), 300),
-        }
-        _json_dump_atomic(manifest_path, manifest)
+        final_path = execution.final_path
+        pdf_path = execution.pdf_path
+        manifest_path = execution.manifest_path
+        template_root = execution.template_root
+        manifest = _json_load(manifest_path, {})
+        self.review_cli.print_status(f"[{WorkflowState.PAPER_TEMPLATE_EXPORT.value}] Final source: {final_path}")
         self.context.artifacts.update(
             {
                 "paper_template_run_dir": str(run_dir),
                 "paper_template_root": str(template_root),
                 "paper_template_manifest": str(manifest_path),
-                "paper_template_typ": str(final_path),
-                "paper_final_typ": str(final_path),
+                "paper_template_kind": execution.template_kind,
+                "paper_final_source": str(final_path),
                 "paper_pdf": str(pdf_path),
             }
         )
+        if final_path.suffix == ".typ":
+            self.context.artifacts.update(
+                {
+                    "paper_template_typ": str(final_path),
+                    "paper_final_typ": str(final_path),
+                }
+            )
+        if final_path.suffix == ".tex":
+            self.context.artifacts.update(
+                {
+                    "paper_template_tex": str(final_path),
+                    "paper_final_tex": str(final_path),
+                }
+            )
         self.context.save()
 
-        stage_goal = (
-            "Use the Typst template assets in the template directory to reorganize the repaired manuscript. "
-            "Create paper_final.typ as the template-formatted manuscript, keep the scientific content unchanged, "
-            "and compile paper.pdf from paper_final.typ. Do not call Gemini. Do not rewrite the paper from scratch."
-        )
+        if execution.template_kind == TEMPLATE_KIND_SPRINGER_LATEX:
+            stage_goal = (
+                "A Springer svjour3 LaTeX draft has already been exported from paper.typ. "
+                "Review paper_final.tex, keep the scientific content unchanged, improve only formatting or LaTeX issues, "
+                "and compile paper.pdf if a local TeX toolchain is available. Do not call Gemini. Do not rewrite the paper from scratch."
+            )
+            template_guidance = textwrap.dedent(
+                f"""
+
+                Template export instructions:
+                - Use the Springer LaTeX template root at: {template_root}
+                - Treat {draft_path} as the content source of truth.
+                - The initial journal-formatted draft already exists at {final_path.name}; edit it in place if needed.
+                - Preserve the paper's factual content, section order, claims, and references.
+                - Keep the output aligned with the svjour3 journal structure from template.tex.
+                - Compile to {pdf_path.name} only if pdflatex/latexmk is available in the local environment.
+                - If you need context, inspect {manifest_path}.
+                """
+            ).strip()
+        else:
+            stage_goal = (
+                "A Typst template draft has already been exported from paper.typ. "
+                "Review paper_final.typ, keep the scientific content unchanged, improve only template or Typst issues, "
+                "and compile paper.pdf from paper_final.typ. Do not call Gemini. Do not rewrite the paper from scratch."
+            )
+            template_guidance = textwrap.dedent(
+                f"""
+
+                Template export instructions:
+                - Use the template root at: {template_root}
+                - Treat {draft_path} as the content source of truth.
+                - The initial template-formatted draft already exists at {final_path.name}; edit it in place if needed.
+                - Preserve the paper's factual content, figures, citations, and section order.
+                - Keep the manuscript aligned with the existing Typst template layout.
+                - Compile the final template source to {pdf_path.name}.
+                - If you need context, inspect {manifest_path}.
+                """
+            ).strip()
         prompt = self.plan_parser.build_codex_prompt(
             plan=self.plan,
             phase=phase,
@@ -2764,22 +3140,7 @@ class FluidAgentPro:
             context=self.context,
             stage_goal=stage_goal,
         )
-        prompt += textwrap.dedent(
-            f"""
-
-            Template export instructions:
-            - Use the template root at: {template_root}
-            - Treat {draft_path} as the content source of truth.
-            - Create {final_path.name} in the workspace root.
-            - Preserve the paper's factual content, figures, citations, and section order.
-            - Use the clear-iclr template layout and keep the manuscript compileable.
-            - If the source draft does not contain an explicit Abstract heading, synthesize a concise abstract from the manuscript content instead of aborting.
-            - Compile the final template source to {pdf_path.name}.
-            - If you need context, inspect {manifest_path}.
-            """
-        ).strip()
-        manifest["abstract_found"] = abstract_found
-        manifest["abstract_preview"] = _shorten_text(abstract_text, 300)
+        prompt += "\n\n" + template_guidance
         prompt += "\n\nTemplate export manifest JSON:\n" + json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
 
         prompt_path = run_dir / "prompt.txt"
@@ -2800,15 +3161,6 @@ class FluidAgentPro:
             status_cb=self.review_cli.print_status,
         )
         self.review_cli.print_status(f"[{WorkflowState.PAPER_TEMPLATE_EXPORT.value}] Codex finished with rc={codex.returncode}; validating output.")
-        execution = TemplateExportExecution(
-            template_root=template_root,
-            draft_path=draft_path,
-            final_path=final_path,
-            pdf_path=pdf_path,
-            manifest_path=manifest_path,
-            bibliography_path=bibliography_path,
-            section_titles=section_titles,
-        )
         validation = self.validation_runner.validate(
             state=WorkflowState.PAPER_TEMPLATE_EXPORT,
             phase=phase,
@@ -3003,7 +3355,8 @@ class FluidAgentPro:
             summary = [
                 f"Template export report: {self.context.artifacts.get('paper_template_report') or self.context.artifacts.get('paper_report') or '(missing)'}",
                 f"Validation report: {validation_report.report_path or '(missing)'}",
-                f"Final Typst source: {self.context.artifacts.get('paper_final_typ', self.workspace / 'paper_final.typ')}",
+                f"Template kind: {self.context.artifacts.get('paper_template_kind', '(unknown)')}",
+                f"Final source: {self.context.artifacts.get('paper_final_source', self.context.artifacts.get('paper_final_tex', self.context.artifacts.get('paper_final_typ', self.workspace / 'paper_final.typ')))}",
                 f"Final PDF: {self.context.artifacts.get('paper_pdf', self.workspace / 'paper.pdf')}",
                 f"Template root: {self.context.artifacts.get('paper_template_root', '(missing)')}",
                 *validation_report.failures,
@@ -3047,6 +3400,7 @@ class FluidAgentPro:
                     "last_message_path": str(codex.last_message_path),
                 },
                 "template_root": str(export.template_root),
+                "template_kind": export.template_kind,
                 "draft_path": str(export.draft_path),
                 "final_path": str(export.final_path),
                 "pdf_path": str(export.pdf_path),
@@ -3073,6 +3427,7 @@ class FluidAgentPro:
                 "codex": report.details["codex"],
                 "template": {
                     "root": str(export.template_root),
+                    "kind": export.template_kind,
                     "draft_path": str(export.draft_path),
                     "final_path": str(export.final_path),
                     "pdf_path": str(export.pdf_path),
@@ -3096,6 +3451,7 @@ class FluidAgentPro:
             "Template export stage failed.",
             f"Codex exit code: {codex.returncode}",
             f"Template root: {export.template_root}",
+            f"Template kind: {export.template_kind}",
             f"Draft source: {export.draft_path}",
             f"Final source: {export.final_path}",
             f"Final PDF: {export.pdf_path}",
@@ -3332,9 +3688,13 @@ class FluidAgentPro:
                 "paper_report",
                 "paper_template_run_dir",
                 "paper_template_root",
+                "paper_template_kind",
                 "paper_template_manifest",
                 "paper_template_typ",
+                "paper_template_tex",
                 "paper_final_typ",
+                "paper_final_tex",
+                "paper_final_source",
                 "paper_pdf",
                 "paper_template_report",
                 "paper_template_validation",
