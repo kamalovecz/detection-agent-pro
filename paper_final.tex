@@ -29,11 +29,11 @@ Metal surface defect detection in real industrial environments remains challengi
 \end{abstract}
 
 \section{Introduction}
-Automatic surface defect detection is a key component of intelligent industrial inspection, especially in steel and metallic production lines that demand high throughput and stable product quality. Compared with general object detection tasks, metallic surface inspection often exhibits stronger background regularity, higher texture similarity between defects and normal regions, and a larger proportion of small or elongated targets. These characteristics make it difficult for standard real-time detectors to maintain both high sensitivity and low false-alarm rates in practical scenes.
+Automatic surface defect detection is a key component of intelligent industrial inspection, especially in steel and metallic production lines that demand high throughput and stable product quality. Compared with general object detection tasks, metallic surface inspection often exhibits stronger background regularity, higher texture similarity between defects and normal regions, and a larger proportion of small or elongated targets. These characteristics make it difficult for standard real-time detectors to maintain both high sensitivity and low false-alarm rates in practical scenes.\cite{fang2020review,zou2021review}
 
-YOLOv8 provides a strong real-time baseline for industrial vision tasks because of its efficient architecture and mature deployment ecosystem. However, when it is directly applied to metallic surface defect detection, performance degradation can still appear in cases involving weak boundaries, tiny targets, and cross-domain data shifts between public datasets and real production images. This motivates the present study, which aims to improve YOLOv8 while preserving its deployment advantages.
+YOLOv8 provides a strong real-time baseline for industrial vision tasks because of its efficient architecture and mature deployment ecosystem.\cite{jocher2024ultralytics} However, when it is directly applied to metallic surface defect detection, performance degradation can still appear in cases involving weak boundaries, tiny targets, and cross-domain data shifts between public datasets and real production images. This motivates the present study, which aims to improve YOLOv8 while preserving its deployment advantages.
 
-The research focus of this project is aligned with three datasets: NEU DET, GC10 DET, and a self-built port\_defect dataset. NEU DET provides controlled steel defect samples with clear industrial relevance. GC10 DET introduces larger appearance variation and stronger inter-class similarity. The port\_defect dataset is used to verify whether improvements learned from public data can transfer to the target industrial scene. On this basis, the paper emphasizes not only benchmark accuracy but also transferability and deployment readiness.
+The research focus of this project is aligned with three datasets: NEU DET, GC10 DET, and a self-built port\_defect dataset. NEU DET provides controlled steel defect samples with clear industrial relevance.\cite{song2013neudet} GC10 DET introduces larger appearance variation and stronger inter-class similarity.\cite{lv2020gc10det} The port\_defect dataset is used to verify whether improvements learned from public data can transfer to the target industrial scene. On this basis, the paper emphasizes not only benchmark accuracy but also transferability and deployment readiness.
 
 The main goal of this work is therefore to establish a complete technical loop for industrial defect inspection: improved YOLOv8 design, public-dataset pretraining, real-scene transfer learning, ablation analysis, and deployment-oriented evaluation. The current draft is structured to support that loop and can be incrementally updated as model modules, training logs, and deployment reports become available in the workspace.
 
@@ -41,7 +41,7 @@ The main goal of this work is therefore to establish a complete technical loop f
 This work addresses metallic surface defect detection under realistic industrial constraints. Given an input image from a metallic surface inspection pipeline, the detector must identify defect categories and localize corresponding regions in real time. The main technical challenges include high-texture background interference, weak edge contrast, small target scale, and domain shift between public datasets and the real industrial environment.
 
 \section{Baseline Detector}
-YOLOv8 is adopted as the baseline detector because it provides a practical balance between detection accuracy, model compactness, and deployment maturity. Its one-stage design is well suited to high-throughput production settings, and it offers a convenient starting point for lightweight structural modification, transfer learning, and downstream export to accelerated inference backends.
+YOLOv8 is adopted as the baseline detector because it provides a practical balance between detection accuracy, model compactness, and deployment maturity.\cite{jocher2024ultralytics} Its one-stage design is well suited to high-throughput production settings, and it offers a convenient starting point for lightweight structural modification, transfer learning, and downstream export to accelerated inference backends.
 
 \section{Improved YOLOv8 Design}
 The proposed detector is built around lightweight modifications that strengthen feature representation for metallic surface inspection. First, shallow-stage structural cues are emphasized so that fine edges and local defect contours can be retained more effectively in the presence of dense texture backgrounds. Second, the high-resolution detection path is enhanced to improve the representation of tiny or texture-similar defects. Third, the multi-scale aggregation process is adjusted to better preserve defect-sensitive details without introducing excessive computational burden.
@@ -80,8 +80,7 @@ This paper draft proposes a complete research framework for real-time metal surf
 
 As the project proceeds, the manuscript can be updated with final model details, quantitative comparison tables, ablation results, transfer-learning evidence, and deployment logs. With those additions, the draft is expected to evolve naturally into a submission-oriented paper for industrial image processing or real-time vision venues.
 
-\begin{thebibliography}{}
-\bibitem{placeholder} Reference list to be added by the authors.
-\end{thebibliography}
+\bibliographystyle{spmpsci}
+\bibliography{references}
 
 \end{document}
