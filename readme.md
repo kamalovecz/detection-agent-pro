@@ -1,6 +1,6 @@
-# FluidAgent Pro
+# Detection_Agent_Pro
 
-detection_Agent_Pro 是一套面向论文与实验闭环的本地研究流程控制器，当前版本主要服务于“金属表面缺陷检测论文”的个人研究工作流。
+Detection_Agent_Pro 是一套面向论文与实验闭环的本地研究流程控制器，当前版本主要服务于“金属表面缺陷检测论文”的个人研究工作流。
 
 它适合把下面这条链路串起来：
 
